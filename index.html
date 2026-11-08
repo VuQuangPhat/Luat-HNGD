@@ -316,11 +316,12 @@ function norm(s){return String(s||"").toLowerCase()}
   }
 
   document.getElementById("pb").addEventListener("click",function(){try{window.print()}catch(e){}});
-  var G=D.gt;
   function chips(a){return (a&&a.length)?'<div class="chips">'+a.map(function(n){return '<button type="button" class="chip" data-n="'+n+'" aria-label="Mở Điều '+n+'">Điều '+n+'</button>'}).join("")+'</div>':""}
   function refs(a){return (a&&a.length)?'<p class="srcline">Nguồn: '+a.map(function(r){return esc(r[0])+(r[1]?" tr."+esc(r[1]):"")}).join("; ")+'</p>':""}
   function ol(a){return a&&a.length?'<ol>'+a.map(function(x){return '<li>'+esc(x)+'</li>'}).join("")+'</ol>':""}
   function ul(a){return a&&a.length?'<ul>'+a.map(function(x){return '<li>'+esc(x)+'</li>'}).join("")+'</ul>':""}
+  function paintGT(){
+  var G=D.gt;
   document.getElementById("gt-cases").innerHTML=G.cases.map(function(c,i){
     return '<article class="card"><p class="chap">Tình huống '+(i+1)+' · '+esc(c.topic)+'</p><h3>'+esc(c.title)+'</h3><p class="lead">'+esc(c.scenario)+'</p><p class="line"><b>Câu hỏi</b></p>'+ol(c.asks)+'<details><summary>Hướng dẫn giải</summary>'+ol(c.guide)+'</details>'+chips(c.dieu)+refs(c.refs)+'</article>'}).join("");
   document.getElementById("gt-stm").innerHTML=G.statements.map(function(c,i){
@@ -330,6 +331,35 @@ function norm(s){return String(s||"").toLowerCase()}
     return '<article class="card"><p class="chap">'+esc(c.kicker)+'</p><h3>Chương '+(i+1)+'. '+esc(c.title)+'</h3><p class="lead">'+esc(c.lead)+'</p><p class="line"><b>Mục tiêu</b></p>'+ul(c.goals)+'<details><summary>Nội dung chương</summary>'+secs+'<p class="line"><b>Tóm lại</b></p>'+ul(c.summary)+'</details><p class="line"><b>Câu hỏi tự kiểm tra:</b> '+esc(c.question)+'</p>'+chips(c.dieu)+refs(c.refs)+'</article>'}).join("");
   document.getElementById("gt-gl").innerHTML=G.glossary.map(function(g){return '<tr><td data-l="Thuật ngữ"><b>'+esc(g.term)+'</b></td><td data-l="Định nghĩa">'+esc(g.definition)+'</td><td data-l="Nguồn">'+esc(g.source)+(g.page?" tr."+esc(g.page):"")+'</td></tr>'}).join("");
   document.getElementById("gt-src").innerHTML="Tài liệu nguồn: "+Object.keys(G.src).filter(function(k){return k!=="T7"}).map(function(k){return esc(k)+" = "+esc(G.src[k])}).join("; ")+".";
+  }
+  paintGT();
+
+  /* Tab 5 đọc từ các tab GT của Google Sheet; lỗi thì giữ dữ liệu nhúng */
+  function lines(t){return String(t||"").split("\n").map(function(x){return x.trim()}).filter(Boolean)}
+  function paras(t){return String(t||"").split(/\n\s*\n/).map(function(x){return x.trim()}).filter(Boolean)}
+  function dieuList(t){return String(t||"").replace(/^'/,"").split(/[^0-9]+/).filter(Boolean).map(Number).filter(function(n){return n>=1&&n<=133})}
+  function refList(t){return String(t||"").split(";").map(function(x){x=x.trim();if(!x)return null;var k=x.indexOf(":");return k<0?[x,""]:[x.slice(0,k).trim(),x.slice(k+1).trim()]}).filter(Boolean)}
+  function applyGT(a){
+    var src=a[0].slice(1),ch=a[1].slice(1),mu=a[2].slice(1),cs=a[3].slice(1),st=a[4].slice(1),gl=a[5].slice(1);
+    if(src.length<6||ch.length!==D.gt.chapters.length||cs.length!==D.gt.cases.length||st.length!==D.gt.statements.length||gl.length<1||mu.length<ch.length) throw new Error("gt shape");
+    var S={};src.forEach(function(r){if(r[0])S[r[0].trim()]=r[1]||""});
+    var secs={};
+    mu.forEach(function(r){var id=(r[0]||"").trim();if(!id)return;(secs[id]=secs[id]||[]).push({o:+r[1]||0,title:r[2]||"",paragraphs:paras(r[3]),bullets:lines(r[4]),refs:refList(r[5])})});
+    var chapters=ch.map(function(r){var id=(r[0]||"").trim(),ss=(secs[id]||[]).sort(function(p,q){return p.o-q.o});
+      if(!id||!r[1]||!ss.length) throw new Error("gt chapter "+id);
+      return {id:id,title:r[1],kicker:r[2]||"",lead:r[3]||"",goals:lines(r[4]),summary:lines(r[5]),question:r[6]||"",refs:refList(r[7]),dieu:dieuList(r[8]),sections:ss}});
+    var cases=cs.map(function(r){if(!r[2])throw new Error("gt case");
+      return {topic:r[1]||"",title:r[2],scenario:r[3]||"",asks:lines(r[4]),guide:lines(r[5]),refs:refList(r[6]),dieu:dieuList(r[7])}});
+    var statements=st.map(function(r){if(!r[2])throw new Error("gt stm");
+      return {topic:r[1]||"",statement:r[2],analysis:r[3]||"",refs:refList(r[4]),dieu:dieuList(r[5])}});
+    var glossary=gl.map(function(r){return {term:r[0]||"",definition:r[1]||"",source:r[2]||"",page:r[3]?+r[3]||r[3]:""}}).filter(function(g){return g.term});
+    D.gt={src:S,chapters:chapters,cases:cases,statements:statements,glossary:glossary};
+    paintGT();
+    var ft=document.querySelector("footer");if(ft)ft.insertAdjacentHTML("beforeend",'<br>Dữ liệu tab 5 (Giáo trình và bài tập) đang đọc từ Google Sheet lúc '+new Date().toLocaleString("vi-VN")+'.');
+  }
+  if(window.fetch&&location.protocol!=="file:"||window.__FORCE_SHEET){
+    Promise.all(["GT Nguồn","GT Chương","GT Mục","GT Tình huống","GT Nhận định","GT Thuật ngữ"].map(loadTab)).then(applyGT).catch(function(e){try{console.warn("Không đọc được tab GT, dùng dữ liệu nhúng:",e)}catch(_){}});
+  }
   var sts=document.querySelectorAll(".subtab");
   sts.forEach(function(b){b.addEventListener("click",function(){
     sts.forEach(function(o){o.setAttribute("aria-selected",o===b?"true":"false")});
