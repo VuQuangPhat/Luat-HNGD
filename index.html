@@ -208,14 +208,25 @@ function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){retur
 function pill(l){var k=l===D.labels.R?"R":(l===D.labels.Q?"Q":"X");return '<span class="pill p-'+k+'">'+esc(l)+'</span>'}
 function norm(s){return String(s||"").toLowerCase()}
 (function(){
+  var fc=document.getElementById("fc");
+  var fv=document.getElementById("fv");
+  function paintStatic(){
   var st=D.stats;
   document.getElementById("stats").innerHTML=
    [["133","Điều của Luật"],[st.rr,"Điều có nhãn Quy định rõ"],[st.qd,"Điều chỉ có liên hệ nội dung"],[st.xm,"Điều chỉ có mục chưa xác minh"],[st.khong,"Điều chưa thấy hướng dẫn riêng"]]
    .map(function(x){return '<div class="stat"><b>'+esc(x[0])+'</b><span>'+esc(x[1])+'</span></div>'}).join("");
-  var fc=document.getElementById("fc");
+  while(fc.options.length>1)fc.remove(1);
   D.chap.forEach(function(c,i){var o=document.createElement("option");o.value=i;o.textContent=c.c+": "+c.t+" (Điều "+c.a+"–"+c.b+")";fc.appendChild(o)});
-  var fv=document.getElementById("fv");
+  while(fv.options.length>1)fv.remove(1);
   Object.keys(D.vb).forEach(function(k){var o=document.createElement("option");o.value=k;o.textContent=D.vb[k];fv.appendChild(o)});
+
+  document.getElementById("inv").innerHTML=D.inv.map(function(x){
+    return '<tr><td data-l="Văn bản">'+esc(x.vb)+'</td><td data-l="Điều/Khoản">'+esc(x.ref)+'</td><td data-l="Điều của Luật">'+x.dieu.map(function(n){return "Điều "+n}).join(", ")+'</td></tr>'}).join("");
+  document.getElementById("vbt").innerHTML=D.vblist.map(function(x){
+    return '<tr><td data-l="Văn bản">'+esc(x[0])+'</td><td data-l="Hiệu lực">'+esc(x[1])+'</td><td data-l="Tình trạng">'+esc(x[2])+'</td><td data-l="Mức xác minh">'+esc(x[3])+'</td></tr>'}).join("");
+  document.getElementById("xm").innerHTML=D.xm.map(function(x){return "<li>"+esc(x)+"</li>"}).join("");
+  }
+  paintStatic();
 
   function matches(r){
     var q=norm(document.getElementById("q").value).trim();
@@ -258,11 +269,51 @@ function norm(s){return String(s||"").toLowerCase()}
   ["q","fc","fs","fv"].forEach(function(id){var e=document.getElementById(id);e.addEventListener("input",render);e.addEventListener("change",render)});
   render();
 
-  document.getElementById("inv").innerHTML=D.inv.map(function(x){
-    return '<tr><td data-l="Văn bản">'+esc(x.vb)+'</td><td data-l="Điều/Khoản">'+esc(x.ref)+'</td><td data-l="Điều của Luật">'+x.dieu.map(function(n){return "Điều "+n}).join(", ")+'</td></tr>'}).join("");
-  document.getElementById("vbt").innerHTML=D.vblist.map(function(x){
-    return '<tr><td data-l="Văn bản">'+esc(x[0])+'</td><td data-l="Hiệu lực">'+esc(x[1])+'</td><td data-l="Tình trạng">'+esc(x[2])+'</td><td data-l="Mức xác minh">'+esc(x[3])+'</td></tr>'}).join("");
-  document.getElementById("xm").innerHTML=D.xm.map(function(x){return "<li>"+esc(x)+"</li>"}).join("");
+  /* Đọc dữ liệu từ Google Sheet (bộ não); lỗi thì giữ dữ liệu nhúng */
+  var SHEET_ID="1Gp7P5wSTmD6SNC8B6kpMsOLcCJTF2zugpKtyX_fUQdg";
+  function csvParse(s){var o=[],r=[],f="",q=false,i=0,c;s=s.replace(/^﻿/,"");
+    for(;i<s.length;i++){c=s[i];
+      if(q){if(c==='"'){if(s[i+1]==='"'){f+='"';i++}else q=false}else f+=c}
+      else if(c==='"')q=true; else if(c===","){r.push(f);f=""}
+      else if(c==="\n"||c==="\r"){if(c==="\r"&&s[i+1]==="\n")i++;r.push(f);f="";o.push(r);r=[]}
+      else f+=c}
+    if(f!==""||r.length){r.push(f);o.push(r)} return o}
+  function loadTab(name){
+    return fetch("https://docs.google.com/spreadsheets/d/"+SHEET_ID+"/gviz/tq?tqx=out:csv&sheet="+encodeURIComponent(name),{cache:"no-store"})
+      .then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.text()}).then(csvParse)}
+  function applySheet(a){
+    var d=a[0].slice(1),h=a[1].slice(1),v=a[2].slice(1),m=a[3].slice(1),x=a[4].slice(1);
+    if(d.length!==133||!h.length||!m.length||!v.length) throw new Error("sheet shape");
+    var VBn={},L={},by={},i;
+    m.forEach(function(r){if(r[0])VBn[r[0]]=r[1]});
+    L.R=D.labels.R;L.Q=D.labels.Q;L.X=D.labels.X;
+    h.forEach(function(r){var n=+r[0];
+      if(!(n>=1&&n<=133)||!VBn[r[1]]||!L[r[5]]) throw new Error("bad row "+r.join("|").slice(0,60));
+      (by[n]=by[n]||[]).push({vb:r[1],ref:r[2]||"",kh:r[3]||"—",nd:r[4]||"",lab:L[r[5]]})});
+    var rows=d.map(function(r,k){var n=+r[0]; if(n!==k+1) throw new Error("dieu order");
+      return {n:n,t:r[1]||"",c:r[2]||"",ct:r[3]||"",g:by[n]||[],giao:r[4]||"",dc:r[5]||"",gc:r[6]||""}});
+    var order={};Object.keys(VBn).forEach(function(k,j){order[VBn[k]]=j});
+    var inv={};
+    rows.forEach(function(r){r.g.forEach(function(e){var key=VBn[e.vb]+"\u0000"+e.ref;
+      var o=inv[key]||(inv[key]={vb:VBn[e.vb],ref:e.ref,dieu:[]});if(o.dieu.indexOf(r.n)<0)o.dieu.push(r.n)})});
+    var invr=Object.keys(inv).map(function(k){var o=inv[k];o.dieu.sort(function(p,q){return p-q});return o});
+    invr.sort(function(p,q){return order[p.vb]-order[q.vb]||(p.ref<q.ref?-1:p.ref>q.ref?1:0)});
+    function has(r,l){return r.g.some(function(e){return e.lab===l})}
+    var st={total:133,
+      co:rows.filter(function(r){return has(r,L.R)||r.giao}).length,
+      rr:rows.filter(function(r){return has(r,L.R)}).length,
+      qd:rows.filter(function(r){return r.g.length&&!has(r,L.R)&&has(r,L.Q)}).length,
+      xm:rows.filter(function(r){return r.g.length&&r.g.every(function(e){return e.lab===L.X})}).length,
+      khong:rows.filter(function(r){return !r.g.length}).length};
+    D.rows=rows;D.vb=VBn;D.inv=invr;D.stats=st;
+    D.vblist=v.map(function(r){return [r[0]||"",r[1]||"",r[2]||"",r[3]||""]});
+    D.xm=x.map(function(r){return r[0]}).filter(Boolean);
+    paintStatic();render();
+    var ft=document.querySelector("footer");if(ft)ft.insertAdjacentHTML("beforeend",'<br>Dữ liệu các tab 1–4 đang đọc từ Google Sheet bộ não lúc '+new Date().toLocaleString("vi-VN")+'.');
+  }
+  if(window.fetch&&location.protocol!=="file:"||window.__FORCE_SHEET){
+    Promise.all(["Điều","Hướng dẫn","Văn bản","Mã VB","Cần xác minh"].map(loadTab)).then(applySheet).catch(function(e){try{console.warn("Không đọc được Sheet, dùng dữ liệu nhúng:",e)}catch(_){}});
+  }
 
   document.getElementById("pb").addEventListener("click",function(){try{window.print()}catch(e){}});
   var G=D.gt;
